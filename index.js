@@ -166,7 +166,7 @@ socket.on('end', () =>
 });
 socket.on('finish', () =>
 {
-	if(opts.verobes > 0) dbg('socket:finish');
+	if(opts.verbose > 0) dbg('socket:finish');
 });
 socket.on('error', err =>
 {
