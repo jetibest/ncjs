@@ -95,108 +95,137 @@ if(!net_opts.port)
 if(opts.verbose > 1) dbg('opts: ' + JSON.stringify(opts));
 if(opts.verbose > 1) dbg('net_opts: ' + JSON.stringify(net_opts));
 
+function start(socket, opts)
+{
+	var stdin_ended = false;
+	var socket_ended = false;
+	var stdout_ended = false;
+
+	process.stdin.on('data', chunk =>
+	{
+		if(opts.verbose > 1) dbg('stdin:data');
+		
+		if(!socket_ended) socket.write(chunk);
+	});
+	process.stdin.on('end', () =>
+	{
+		stdin_ended = true;
+		
+		if(opts.verbose > 0) dbg('stdin:end');
+		
+		if(!socket_ended) socket.end();
+	});
+	process.stdin.on('error', err =>
+	{
+		if(opts.verbose > 0) dbg('stdin:error');
+		
+		die('error(stdin): ' + err.code);
+	});
+	process.stdin.on('close', () =>
+	{
+		stdin_ended = true;
+		
+		if(opts.verbose > 0) dbg('stdin:close');
+		
+		if(!socket_ended) socket.end();
+	});
+	
+	socket.on('data', chunk =>
+	{
+		if(opts.verbose > 1) dbg('socket:data');
+		
+		if(!stdout_ended) process.stdout.write(chunk);
+	});
+	socket.on('end', () =>
+	{
+		socket_ended = true;
+		
+		if(opts.verbose > 0) dbg('socket:end');
+		
+		if(!stdout_ended) process.stdout.end();
+		
+		if(!stdin_ended && opts.close) process.stdin.destroy();
+	});
+	socket.on('finish', () =>
+	{
+		if(opts.verbose > 0) dbg('socket:finish');
+	});
+	socket.on('error', err =>
+	{
+		if(opts.verbose > 0) dbg('socket:error');
+		
+		die('error(socket): ' + err.code);
+	});
+	socket.on('close', () =>
+	{
+		socket_ended = true;
+		
+		if(opts.verbose > 0) dbg('socket:close');
+	});
+	
+	process.stdout.on('finish', () =>
+	{
+		if(opts.verbose > 0) dbg('stdout:finish');
+	});
+	process.stdout.on('error', err =>
+	{
+		if(opts.verbose > 0) dbg('stdout:error');
+		
+		die('error(stdout): ' + err.code);
+	});
+	process.stdout.on('close', () =>
+	{
+		stdout_ended = true;
+		
+		if(opts.verbose > 0) dbg('stdout:close');
+	});
+	
+	process.stderr.on('error', err => process.exit(2));
+}
+
+var connect = err =>
+{
+	if(err)
+	{
+		if(!net_opts.family)
+		{
+			// check if we can retry with IPv4
+			net_opts.family = 4;
+			
+			if(opts.verbose > 0) dbg('net:connect(): trying IPv4...');
+		}
+		else
+		{
+			// no other connection options available
+			return die('error(net): ' + err.code);
+		}
+	}
+	
+	try
+	{
+		var socket = net.createConnection(net_opts);
+		socket.on('connect', () =>
+		{
+			if(opts.verbose > 0) dbg('socket:connect');
+			
+			clearTimeout(connectTimer);
+			
+			socket.off('error', connect);
+			
+			start(socket, opts);
+		});
+		socket.on('error', connect);
+		
+	}
+	catch(err)
+	{
+		die('error(net): ' + err.code);
+	}
+};
+
 // apply connect timeout
 var connectTimer;
 if(opts.connectTimeout) connectTimer = setTimeout(() => die('error: Connection timeout (' + (net_opts.host || '') + ':' + net_opts.port + '). Failed to connect within ' + opts.connectTimeout + ' seconds.'), opts.connectTimeout * 1000);
 
-var socket;
-try
-{
-	socket = net.createConnection(net_opts);
-}
-catch(err)
-{
-	die('error(net): ' + err.code);
-}
-
-var stdin_ended = false;
-var socket_ended = false;
-var stdout_ended = false;
-
-process.stdin.on('data', chunk =>
-{
-	if(opts.verbose > 1) dbg('stdin:data');
-	
-	if(!socket_ended) socket.write(chunk);
-});
-process.stdin.on('end', () =>
-{
-	stdin_ended = true;
-	
-	if(opts.verbose > 0) dbg('stdin:end');
-	
-	if(!socket_ended) socket.end();
-});
-process.stdin.on('error', err =>
-{
-	if(opts.verbose > 0) dbg('stdin:error');
-	
-	die('error(stdin): ' + err.code);
-});
-process.stdin.on('close', () =>
-{
-	stdin_ended = true;
-	
-	if(opts.verbose > 0) dbg('stdin:close');
-	
-	if(!socket_ended) socket.end();
-});
-
-socket.on('connect', () =>
-{
-	if(opts.verbose > 0) dbg('socket:connect');
-	
-	clearTimeout(connectTimer);
-});
-socket.on('data', chunk =>
-{
-	if(opts.verbose > 1) dbg('socket:data');
-	
-	if(!stdout_ended) process.stdout.write(chunk);
-});
-socket.on('end', () =>
-{
-	socket_ended = true;
-	
-	if(opts.verbose > 0) dbg('socket:end');
-	
-	if(!stdout_ended) process.stdout.end();
-	
-	if(!stdin_ended && opts.close) process.stdin.destroy();
-});
-socket.on('finish', () =>
-{
-	if(opts.verbose > 0) dbg('socket:finish');
-});
-socket.on('error', err =>
-{
-	if(opts.verbose > 0) dbg('socket:error');
-	
-	die('error(socket): ' + err.code);
-});
-socket.on('close', () =>
-{
-	socket_ended = true;
-	
-	if(opts.verbose > 0) dbg('socket:close');
-});
-
-process.stdout.on('finish', () =>
-{
-	if(opts.verbose > 0) dbg('stdout:finish');
-});
-process.stdout.on('error', err =>
-{
-	if(opts.verbose > 0) dbg('stdout:error');
-	
-	die('error(stdout): ' + err.code);
-});
-process.stdout.on('close', () =>
-{
-	stdout_ended = true;
-	
-	if(opts.verbose > 0) dbg('stdout:close');
-});
-
-process.stderr.on('error', err => process.exit(2));
+connect();
 
